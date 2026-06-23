@@ -305,27 +305,30 @@ function stopRecording() {
 }
 
 // ── Release mic when app goes to background ──
-document.addEventListener("visibilitychange", function() {
-  if (document.hidden) {
-    // Stop recording if active
+// iOS needs multiple events because visibilitychange may fire too late
+function releaseMicFully() {
+  try {
     if (listening) { stopRecording(); }
-    // Release mic stream to prevent iOS background audio warning
-    if (recStream) {
-      recStream.getTracks().forEach(function(t) { t.stop(); });
-      recStream = null;
-      micPermissionGranted = false;
-    }
-  }
-});
-
-window.addEventListener("pagehide", function() {
-  if (listening) { stopRecording(); }
+  } catch(e) {}
   if (recStream) {
-    recStream.getTracks().forEach(function(t) { t.stop(); });
+    try {
+      recStream.getTracks().forEach(function(t) { t.stop(); });
+    } catch(e) {}
     recStream = null;
     micPermissionGranted = false;
   }
+}
+
+document.addEventListener("visibilitychange", function() {
+  if (document.hidden) { releaseMicFully(); }
 });
+window.addEventListener("pagehide", releaseMicFully);
+window.addEventListener("blur", releaseMicFully);
+document.addEventListener("webkitvisibilitychange", function() {
+  if (document.webkitHidden) { releaseMicFully(); }
+});
+// iOS specific: when switching tabs or closing
+window.addEventListener("beforeunload", releaseMicFully);
 
 function showRecIndicator() {
   var old = document.getElementById("recInd");
