@@ -273,7 +273,7 @@ function startRecording() {
       var audioBlob = new Blob(audioChunks, { type: mediaRecorder.mimeType || "audio/webm" });
       transcribeAudio(audioBlob);
     };
-    mediaRecorder.start();
+    mediaRecorder.start(1000);
     listening = true;
     document.getElementById("micBtn").className = "mic on";
     document.getElementById("micBtn").innerHTML = "&#9209;";
@@ -291,7 +291,10 @@ function startRecording() {
 }
 
 function stopRecording() {
-  if (mediaRecorder && mediaRecorder.state !== "inactive") { mediaRecorder.stop(); }
+  if (mediaRecorder && mediaRecorder.state !== "inactive") {
+    try { mediaRecorder.requestData(); } catch(e) {}
+    mediaRecorder.stop();
+  }
   listening = false;
   document.getElementById("micBtn").className = "mic";
   document.getElementById("micBtn").innerHTML = "&#127897;";
@@ -336,7 +339,7 @@ function hideRecIndicator() {
 }
 
 function transcribeAudio(blob) {
-  if (blob.size < 100) { toast("Audio too short"); return; }
+  if (blob.size < 50) { toast("Audio too short — try speaking longer"); return; }
   toast("Transcribing...");
   var formData = new FormData();
   formData.append("file", blob, "audio.webm");
