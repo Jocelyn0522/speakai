@@ -132,6 +132,7 @@ var mode = "free";
 var mediaRecorder = null;
 var audioChunks = [];
 var recStream = null;
+var micPermissionGranted = false;
 
 var MODES = {
   free: {
@@ -205,8 +206,9 @@ function toggleMic() {
 }
 
 function startRecording() {
-  navigator.mediaDevices.getUserMedia({ audio: true }).then(function(stream) {
+  function beginRec(stream) {
     recStream = stream;
+    micPermissionGranted = true;
     audioChunks = [];
     // Try audio/mp4 for iOS, fallback to webm
     var mimeType = "audio/mp4";
@@ -230,8 +232,7 @@ function startRecording() {
 
     mediaRecorder.onstop = function() {
       var audioBlob = new Blob(audioChunks, { type: mediaRecorder.mimeType || "audio/webm" });
-      // Stop mic
-      if (recStream) { recStream.getTracks().forEach(function(t){ t.stop(); }); recStream = null; }
+      // Keep stream alive for reuse — do NOT stop tracks
       // Transcribe via Whisper
       transcribeAudio(audioBlob);
     };
@@ -241,10 +242,17 @@ function startRecording() {
     document.getElementById("micBtn").className = "mic on";
     document.getElementById("micBtn").innerHTML = "&#9209;";
     showRecIndicator();
-    toast("Recording... tap to stop");
-  }).catch(function(err) {
-    toast("Mic denied - check Settings > Safari > Microphone");
-  });
+  }
+  if (micPermissionGranted && recStream) {
+    // Reuse existing stream — no permission prompt
+    beginRec(recStream);
+  } else {
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(function(stream) {
+      beginRec(stream);
+    }).catch(function(err) {
+      toast("Mic denied - check Settings > Safari > Microphone");
+    });
+  }
 }
 
 function stopRecording() {
