@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="SpeakAI">
 <title>SpeakAI</title>
 <style>
-:root{--bg:#0f0f13;--s1:#1a1a24;--s2:#22222e;--bd:#2e2e3e;--ac:#6c63ff;--ac2:#a78bfa;--gr:#34d399;--rd:#f87171;--yl:#fbbf24;--tx:#f0f0f5;--t2:#9090a8;--t3:#5a5a72}
+:root{--bg:#0f0f13;--s1:#1a1a24;--s2:#22222e;--bd:#2e2e3e;--ac:#6c63ff;--ac2:#a78bfa;--gr:#34d399;--rd:#f87171;--yl:#fbbf24;--bl:#60a5fa;--tx:#f0f0f5;--t2:#9090a8;--t3:#5a5a72}
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html,body{height:100%;overflow:hidden;background:var(--bg)}
 body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif;color:var(--tx);display:flex;flex-direction:column;height:100dvh}
@@ -33,7 +33,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif;color
 .av{width:30px;height:30px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:14px;margin-top:2px}
 .av.ai{background:linear-gradient(135deg,var(--ac),var(--ac2))}
 .av.me{background:var(--s2);font-size:16px}
-.mc2{display:flex;flex-direction:column;gap:4px;max-width:78%}
+.mc2{display:flex;flex-direction:column;gap:4px;max-width:82%}
 .row.u .mc2{align-items:flex-end}
 .bub{padding:11px 14px;border-radius:18px;font-size:.92rem;line-height:1.55;word-break:break-word}
 .u .bub{background:var(--ac);color:#fff;border-bottom-right-radius:5px}
@@ -43,13 +43,24 @@ body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif;color
 .dots span:nth-child(2){animation-delay:.2s}
 .dots span:nth-child(3){animation-delay:.4s}
 @keyframes bnc{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-6px)}}
-.fb{background:var(--s1);border:1px solid var(--bd);border-left:3px solid var(--yl);border-radius:10px;padding:10px 13px;font-size:.8rem;line-height:1.5;margin-top:2px}
-.fb-t{font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;color:var(--yl);font-weight:700;margin-bottom:5px}
-.fb-row{margin-bottom:4px}
-.orig{color:var(--rd);text-decoration:line-through}
-.corr{color:var(--gr);font-weight:600}
-.tip{color:var(--t2);font-style:italic}
-.ok{font-size:.75rem;color:var(--gr);font-style:italic;margin-top:2px}
+
+/* ── FEEDBACK CARD (under user message) ── */
+.fb-card{background:var(--s1);border:1px solid var(--bd);border-radius:12px;padding:12px 14px;margin-top:4px;width:100%;text-align:left}
+.fb-header{display:flex;align-items:center;gap:6px;margin-bottom:8px}
+.fb-badge{font-size:.68rem;font-weight:700;padding:2px 8px;border-radius:10px;text-transform:uppercase;letter-spacing:.3px}
+.fb-badge.grammar{background:rgba(248,113,113,.15);color:var(--rd)}
+.fb-badge.vocab{background:rgba(96,165,250,.15);color:var(--bl)}
+.fb-badge.phrasing{background:rgba(251,191,36,.15);color:var(--yl)}
+.fb-badge.natural{background:rgba(52,211,153,.15);color:var(--gr)}
+.fb-item{margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--bd)}
+.fb-item:last-child{margin-bottom:0;padding-bottom:0;border-bottom:none}
+.fb-original{font-size:.85rem;color:var(--rd);text-decoration:line-through;margin-bottom:2px}
+.fb-arrow{color:var(--t3);font-size:.75rem;margin:0 2px}
+.fb-corrected{font-size:.85rem;color:var(--gr);font-weight:600}
+.fb-explanation{font-size:.78rem;color:var(--t2);margin-top:4px;line-height:1.5}
+.fb-perfect{font-size:.85rem;color:var(--gr);font-weight:600;text-align:center;padding:6px 0}
+.fb-summary{font-size:.72rem;color:var(--t3);margin-top:6px;text-align:right}
+
 .bot{flex-shrink:0;background:var(--bg);border-top:1px solid var(--bd);padding:12px 14px;padding-bottom:max(12px,env(safe-area-inset-bottom))}
 .hints{display:flex;gap:6px;margin-bottom:10px;overflow-x:auto;padding-bottom:2px}
 .hints::-webkit-scrollbar{display:none}
@@ -133,27 +144,28 @@ var mediaRecorder = null;
 var audioChunks = [];
 var recStream = null;
 var micPermissionGranted = false;
+var pendingUserRow = null;
 
 var MODES = {
   free: {
     hints: ["Tell me about your day", "What are your weekend plans?", "Recommend a movie", "What do you think about AI?", "Describe your hometown"],
-    sys: "You are a friendly English speaking coach. The user is a Taiwanese Product Designer (B1-B2) practising English. Have a natural conversation. After your reply, output ONLY this JSON on the last line: {\"f\":[{\"o\":\"original phrase\",\"c\":\"corrected version\",\"t\":\"tip\"}]} or {\"f\":\"ok\"} if perfect. Keep reply under 3 sentences."
+    sys: 'You are a friendly English speaking coach for a Taiwanese Product Designer (B1-B2 level). Have a natural conversation. You MUST analyze the user message for grammar, vocabulary, and phrasing errors. Always respond with JSON.\n\nReturn EXACTLY this format:\n{"reply":"Your natural conversational reply (2-3 sentences, ask a follow-up question)","feedback":[{"type":"grammar|vocabulary|phrasing|natural","original":"the exact wrong phrase from user","correction":"the correct/better version","explanation":"simple explanation of why"}]}\n\nIf the user English is perfect, use: {"reply":"...","feedback":[]}\n\nRules:\n- "type" must be one of: grammar, vocabulary, phrasing, natural\n- "original" must be the EXACT words the user said (not paraphrased)\n- "correction" is the fixed version\n- "explanation" is a short, clear reason (1 sentence)\n- Pick 1-4 most important errors (not every tiny mistake)\n- "natural" type = suggest a more native/natural way to say something even if technically correct'
   },
   interview: {
     hints: ["Tell me about yourself", "Walk me through your portfolio", "How do you handle conflict?", "Describe a design failure", "Why do you want this role?"],
-    sys: "You are a hiring manager interviewing for Staff Product Designer. Ask one question, react to answers. After your reply, output JSON on last line: {\"f\":[{\"o\":\"phrase\",\"c\":\"better version\",\"t\":\"why\"}]} or {\"f\":\"ok\"}."
+    sys: 'You are a hiring manager interviewing for a Staff Product Designer role at a top tech company. The candidate is Taiwanese (B1-B2 English). Ask one question at a time, react naturally. You MUST respond with JSON.\n\nReturn EXACTLY:\n{"reply":"Your response + next question","feedback":[{"type":"grammar|vocabulary|phrasing|natural","original":"exact wrong phrase","correction":"better professional version","explanation":"why this is better for interviews"}]}\n\nIf perfect: {"reply":"...","feedback":[]}\n\nFocus feedback on: professional vocabulary, confident phrasing, STAR structure, interview-appropriate language.'
   },
   design: {
     hints: ["What is your design process?", "Thoughts on design systems?", "How do you do user research?", "Figma vs other tools?", "How do you present to stakeholders?"],
-    sys: "You are a senior Product Designer chatting with a peer. Discuss UX, design systems, product thinking. After your reply, output JSON on last line: {\"f\":[{\"o\":\"phrase\",\"c\":\"better UX term\",\"t\":\"explanation\"}]} or {\"f\":\"ok\"}."
+    sys: 'You are a senior Product Designer chatting with a peer. Discuss UX, design systems, product thinking. You MUST respond with JSON.\n\nReturn EXACTLY:\n{"reply":"Your response with design vocabulary","feedback":[{"type":"grammar|vocabulary|phrasing|natural","original":"exact wrong phrase","correction":"better UX/design term","explanation":"why"}]}\n\nIf perfect: {"reply":"...","feedback":[]}\n\nTeach professional design English through corrections and natural usage.'
   },
   grammar: {
     hints: ["I have been to many places", "I used to work on mobile apps", "If I had more time I would...", "The design was made by me", "I am working here since 2020"],
-    sys: "You are a grammar coach. Reply conversationally. Then output JSON on last line listing ALL errors: {\"f\":[{\"o\":\"wrong phrase\",\"c\":\"correct\",\"t\":\"grammar rule\"}]} or {\"f\":\"ok\"}."
+    sys: 'You are a strict grammar coach. Reply conversationally. You MUST respond with JSON and list ALL grammar errors.\n\nReturn EXACTLY:\n{"reply":"Conversational reply","feedback":[{"type":"grammar|vocabulary|phrasing|natural","original":"exact wrong phrase","correction":"correct version","explanation":"grammar rule explanation"}]}\n\nIf perfect: {"reply":"...","feedback":[]}\n\nPoint out EVERY error. Explain the grammar rule clearly.'
   },
   debate: {
     hints: ["AI will replace designers", "Remote work is better", "UX research is overrated", "Design systems kill creativity", "Social media does more harm than good"],
-    sys: "You are a debate partner. Take the opposing view. After reply, output JSON on last line: {\"f\":[{\"o\":\"phrase\",\"c\":\"more persuasive version\",\"t\":\"why\"}]} or {\"f\":\"ok\"}."
+    sys: 'You are a debate partner. Take the opposing view. You MUST respond with JSON.\n\nReturn EXACTLY:\n{"reply":"Your counter-argument","feedback":[{"type":"grammar|vocabulary|phrasing|natural","original":"exact wrong phrase","correction":"more persuasive/formal version","explanation":"why"}]}\n\nIf perfect: {"reply":"...","feedback":[]}\n\nFocus on: persuasive language, hedging, emphasis, formal vocabulary.'
   }
 };
 
@@ -210,33 +222,22 @@ function startRecording() {
     recStream = stream;
     micPermissionGranted = true;
     audioChunks = [];
-    // Try audio/mp4 for iOS, fallback to webm
     var mimeType = "audio/mp4";
-    if (!MediaRecorder.isTypeSupported(mimeType)) {
-      mimeType = "audio/webm";
-    }
-    if (!MediaRecorder.isTypeSupported(mimeType)) {
-      mimeType = "";
-    }
+    if (!MediaRecorder.isTypeSupported(mimeType)) { mimeType = "audio/webm"; }
+    if (!MediaRecorder.isTypeSupported(mimeType)) { mimeType = ""; }
     try {
       mediaRecorder = mimeType ? new MediaRecorder(stream, { mimeType: mimeType }) : new MediaRecorder(stream);
     } catch(e) {
       toast("Recording not supported");
-      stream.getTracks().forEach(function(t){ t.stop(); });
       return;
     }
-
     mediaRecorder.ondataavailable = function(e) {
       if (e.data && e.data.size > 0) audioChunks.push(e.data);
     };
-
     mediaRecorder.onstop = function() {
       var audioBlob = new Blob(audioChunks, { type: mediaRecorder.mimeType || "audio/webm" });
-      // Keep stream alive for reuse — do NOT stop tracks
-      // Transcribe via Whisper
       transcribeAudio(audioBlob);
     };
-
     mediaRecorder.start();
     listening = true;
     document.getElementById("micBtn").className = "mic on";
@@ -244,21 +245,18 @@ function startRecording() {
     showRecIndicator();
   }
   if (micPermissionGranted && recStream) {
-    // Reuse existing stream — no permission prompt
     beginRec(recStream);
   } else {
     navigator.mediaDevices.getUserMedia({ audio: true }).then(function(stream) {
       beginRec(stream);
-    }).catch(function(err) {
+    }).catch(function() {
       toast("Mic denied - check Settings > Safari > Microphone");
     });
   }
 }
 
 function stopRecording() {
-  if (mediaRecorder && mediaRecorder.state !== "inactive") {
-    mediaRecorder.stop();
-  }
+  if (mediaRecorder && mediaRecorder.state !== "inactive") { mediaRecorder.stop(); }
   listening = false;
   document.getElementById("micBtn").className = "mic";
   document.getElementById("micBtn").innerHTML = "&#127897;";
@@ -282,18 +280,16 @@ function hideRecIndicator() {
 function transcribeAudio(blob) {
   if (blob.size < 100) { toast("Audio too short"); return; }
   toast("Transcribing...");
-
   var formData = new FormData();
   formData.append("file", blob, "audio.webm");
   formData.append("model", "whisper-1");
   formData.append("language", "en");
-
   fetch("https://api.openai.com/v1/audio/transcriptions", {
     method: "POST",
     headers: { "Authorization": "Bearer " + apiKey },
     body: formData
   }).then(function(res) {
-    if (!res.ok) return res.json().then(function(d){ throw new Error(d.error ? d.error.message : "Whisper error " + res.status); });
+    if (!res.ok) return res.json().then(function(d){ throw new Error(d.error ? d.error.message : "Whisper error"); });
     return res.json();
   }).then(function(data) {
     var text = data.text.trim();
@@ -311,7 +307,6 @@ function transcribeAudio(blob) {
 
 // ── SEND ─────────────────────────────────────────────────
 function onKey(e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }
-
 function resize(el) { el.style.height = "auto"; el.style.height = Math.min(el.scrollHeight, 100) + "px"; }
 
 function send() {
@@ -323,18 +318,21 @@ function send() {
   var e = document.getElementById("empty");
   if (e) e.remove();
 
-  addBub("u", text, null);
+  // Add user bubble — save reference so we can attach feedback later
+  pendingUserRow = addUserBubble(text);
   msgs.push({ role: "user", content: text });
 
   var tid = addThink();
   thinking = true;
   document.getElementById("sb").disabled = true;
 
+  // Use JSON mode for reliable structured output
   var body = JSON.stringify({
     model: MODEL,
     messages: [{ role: "system", content: MODES[mode].sys }].concat(msgs),
-    temperature: 0.8,
-    max_tokens: 600
+    temperature: 0.7,
+    max_tokens: 800,
+    response_format: { type: "json_object" }
   });
 
   fetch("https://api.openai.com/v1/chat/completions", {
@@ -342,16 +340,32 @@ function send() {
     headers: { "Content-Type": "application/json", "Authorization": "Bearer " + apiKey },
     body: body
   }).then(function(res) {
-    if (!res.ok) return res.json().then(function(d){ throw new Error(d.error ? d.error.message : "API error " + res.status); });
+    if (!res.ok) return res.json().then(function(d){ throw new Error(d.error ? d.error.message : "API error"); });
     return res.json();
   }).then(function(data) {
-    var reply = data.choices[0].message.content;
-    msgs.push({ role: "assistant", content: reply });
+    var raw = data.choices[0].message.content;
+    msgs.push({ role: "assistant", content: raw });
     removeThink(tid);
-    renderReply(reply);
+
+    // Parse structured JSON response
+    var parsed = null;
+    try { parsed = JSON.parse(raw); } catch(e) {}
+
+    if (parsed && parsed.reply) {
+      // 1. Add AI reply bubble
+      addAIBubble(parsed.reply);
+      // 2. Attach feedback to user's message
+      if (pendingUserRow) {
+        attachFeedback(pendingUserRow, parsed.feedback || []);
+        pendingUserRow = null;
+      }
+    } else {
+      // Fallback: show raw text
+      addAIBubble(raw);
+    }
   }).catch(function(err) {
     removeThink(tid);
-    addBub("ai", "Error: " + err.message, null);
+    addAIBubble("Error: " + err.message);
   }).finally(function() {
     thinking = false;
     document.getElementById("sb").disabled = false;
@@ -359,42 +373,51 @@ function send() {
   });
 }
 
-function renderReply(full) {
-  var lines = full.trim().split("\n");
-  var last = lines[lines.length - 1].trim();
-  var fb = null;
-  var text = full;
-  if (last.indexOf("{") === 0 && last.indexOf('"f"') >= 0) {
-    try {
-      fb = JSON.parse(last);
-      text = lines.slice(0, -1).join("\n").trim();
-    } catch(e) {}
-  }
-  addBub("ai", text, fb);
+// ── BUBBLE HELPERS ───────────────────────────────────────
+function addUserBubble(text) {
+  var row = document.createElement("div");
+  row.className = "row u";
+  row.innerHTML = '<div class="mc2"><div class="bub">' + esc(text) + '</div><div class="fb-container"></div></div><div class="av me">&#128522;</div>';
+  document.getElementById("chat").appendChild(row);
+  scrollBot();
+  return row;
 }
 
-function addBub(side, text, fb) {
+function addAIBubble(text) {
   var row = document.createElement("div");
-  row.className = "row " + side;
-  var av = side === "u" ? '<div class="av me">&#128522;</div>' : '<div class="av ai">&#129302;</div>';
-  var fbHtml = "";
-  if (fb) {
-    if (fb.f === "ok") {
-      fbHtml = '<div class="ok">&#10003; Great English! No corrections needed.</div>';
-    } else if (Array.isArray(fb.f) && fb.f.length > 0) {
-      fbHtml = '<div class="fb"><div class="fb-t">&#9997; Feedback</div>';
-      fb.f.forEach(function(item) {
-        fbHtml += '<div class="fb-row"><span class="orig">' + esc(item.o) + '</span> &rarr; <span class="corr">' + esc(item.c) + '</span><br><span class="tip">&#128161; ' + esc(item.t) + "</span></div>";
-      });
-      fbHtml += "</div>";
-    }
-  }
-  if (side === "u") {
-    row.innerHTML = '<div class="mc2"><div class="bub">' + esc(text) + "</div>" + fbHtml + "</div>" + av;
-  } else {
-    row.innerHTML = av + '<div class="mc2"><div class="bub">' + esc(text) + "</div>" + fbHtml + "</div>";
-  }
+  row.className = "row ai";
+  row.innerHTML = '<div class="av ai">&#129302;</div><div class="mc2"><div class="bub">' + esc(text) + "</div></div>";
   document.getElementById("chat").appendChild(row);
+  scrollBot();
+}
+
+function attachFeedback(userRow, feedback) {
+  var container = userRow.querySelector(".fb-container");
+  if (!container) return;
+
+  if (feedback.length === 0) {
+    container.innerHTML = '<div class="fb-perfect">&#10003; Perfect English! No corrections needed.</div>';
+    return;
+  }
+
+  var html = '<div class="fb-card">';
+  html += '<div class="fb-header"><span style="font-size:.78rem;font-weight:700;color:var(--yl)">&#9997; Corrections (' + feedback.length + ')</span></div>';
+
+  feedback.forEach(function(item) {
+    var typeClass = item.type || "grammar";
+    var typeLabel = item.type || "grammar";
+    html += '<div class="fb-item">';
+    html += '<span class="fb-badge ' + typeClass + '">' + typeLabel + "</span>";
+    html += '<div style="margin-top:6px"><span class="fb-original">' + esc(item.original || "") + '</span></div>';
+    html += '<div><span class="fb-arrow">&#8594;</span> <span class="fb-corrected">' + esc(item.correction || "") + '</span></div>';
+    if (item.explanation) {
+      html += '<div class="fb-explanation">&#128161; ' + esc(item.explanation) + "</div>";
+    }
+    html += "</div>";
+  });
+
+  html += "</div>";
+  container.innerHTML = html;
   scrollBot();
 }
 
@@ -412,14 +435,13 @@ function removeThink(id) { var el = document.getElementById(id); if (el) el.remo
 
 function clearChat() {
   msgs = [];
+  pendingUserRow = null;
   document.getElementById("chat").innerHTML = '<div class="empty" id="empty"><div class="empty-i">&#127897;</div><div class="empty-t">Ready to practise!</div><div class="empty-s">Tap the mic to record, or type.</div></div>';
   toast("Chat cleared");
 }
 
 function scrollBot() { var c = document.getElementById("chat"); setTimeout(function(){ c.scrollTop = c.scrollHeight; }, 50); }
-
 function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/\n/g,"<br>"); }
-
 function toast(msg) {
   var t = document.getElementById("toast");
   t.textContent = msg; t.className = "toast on";
