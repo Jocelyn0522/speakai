@@ -59,6 +59,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif;color
 .fb-corrected{font-size:.85rem;color:var(--gr);font-weight:600}
 .fb-explanation{font-size:.78rem;color:var(--t2);margin-top:4px;line-height:1.5}
 .fb-perfect{font-size:.85rem;color:var(--gr);font-weight:600;text-align:center;padding:6px 0}
+.fb-rewrite{background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.25);border-radius:10px;padding:10px 12px;margin-bottom:10px}
+.fb-rewrite-label{font-size:.72rem;font-weight:700;color:var(--gr);margin-bottom:4px}
+.fb-rewrite-text{font-size:.88rem;color:var(--tx);line-height:1.5;font-weight:500}
 .fb-summary{font-size:.72rem;color:var(--t3);margin-top:6px;text-align:right}
 
 .bot{flex-shrink:0;background:var(--bg);border-top:1px solid var(--bd);padding:12px 14px;padding-bottom:max(12px,env(safe-area-inset-bottom))}
@@ -164,7 +167,7 @@ var pendingUserRow = null;
 var MODES = {
   free: {
     hints: ["Tell me about your day", "What are your weekend plans?", "Recommend a movie", "What do you think about AI?", "Describe your hometown"],
-    sys: 'You are a friendly English speaking coach for a Taiwanese Product Designer (B1-B2 level). Have a natural conversation. You MUST analyze the user message for grammar, vocabulary, and phrasing errors. Always respond with JSON.\n\nReturn EXACTLY this format:\n{"reply":"Your natural conversational reply (2-3 sentences, ask a follow-up question)","feedback":[{"type":"grammar|vocabulary|phrasing|natural","original":"the exact wrong phrase from user","correction":"the correct/better version","explanation":"simple explanation of why"}]}\n\nIf the user English is perfect, use: {"reply":"...","feedback":[]}\n\nRules:\n- "type" must be one of: grammar, vocabulary, phrasing, natural\n- "original" must be the EXACT words the user said (not paraphrased)\n- "correction" is the fixed version\n- "explanation" is a short, clear reason (1 sentence)\n- Pick 1-4 most important errors (not every tiny mistake)\n- "natural" type = suggest a more native/natural way to say something even if technically correct'
+    sys: 'You are a friendly but thorough English speaking coach for a Taiwanese Product Designer (B1-B2 level). Have a natural conversation. You MUST analyze EVERY part of the user message for errors.\n\nAlways respond with JSON in EXACTLY this format:\n{"reply":"Your natural conversational reply (2-3 sentences, ask a follow-up question)","rewritten":"The user entire sentence rewritten correctly (only if there are ANY errors, omit if perfect)","feedback":[{"type":"grammar|vocabulary|phrasing|natural|sentence-structure","original":"the exact wrong phrase OR the full sentence if the whole structure is wrong","correction":"the correct version","explanation":"clear explanation of why"}]}\n\nCRITICAL RULES:\n- If the ENTIRE sentence structure is awkward or has multiple grammar issues, include a feedback item with type "sentence-structure" where original = the full user sentence and correction = the fully rewritten sentence\n- Do NOT skip errors. If the user said something weird, you MUST flag it\n- Check for: wrong tense, subject-verb agreement, word order, missing/extra words, preposition errors, article errors, plural/singular, Chinese-English translation patterns\n- "original" must be EXACT words from user (not paraphrased)\n- "correction" is the fixed version\n- "explanation" is short and clear (1 sentence)\n- Pick up to 6 most important errors (not just 1-4)\n- "natural" type = suggest a more native way to say something even if technically correct\n- "rewritten" field = the COMPLETE corrected version of what the user said, so they can see the full proper sentence\n- If user English is perfect: {"reply":"...","feedback":[]} (omit "rewritten")'
   },
   interview: {
     hints: ["Tell me about yourself", "Walk me through your portfolio", "How do you handle conflict?", "Describe a design failure", "Why do you want this role?"],
@@ -417,7 +420,7 @@ function send() {
       addAIBubble(parsed.reply);
       // 2. Attach feedback to user's message
       if (pendingUserRow) {
-        attachFeedback(pendingUserRow, parsed.feedback || []);
+        attachFeedback(pendingUserRow, parsed.feedback || [], parsed.rewritten || "");
         pendingUserRow = null;
       }
     } else {
@@ -452,16 +455,19 @@ function addAIBubble(text) {
   scrollBot();
 }
 
-function attachFeedback(userRow, feedback) {
+function attachFeedback(userRow, feedback, rewritten) {
   var container = userRow.querySelector(".fb-container");
   if (!container) return;
 
-  if (feedback.length === 0) {
+  if (feedback.length === 0 && !rewritten) {
     container.innerHTML = '<div class="fb-perfect">&#10003; Perfect English! No corrections needed.</div>';
     return;
   }
 
   var html = '<div class="fb-card">';
+  if (rewritten) {
+    html += '<div class="fb-rewrite"><div class="fb-rewrite-label">&#10004; Better way to say it:</div><div class="fb-rewrite-text">' + esc(rewritten) + '</div></div>';
+  }
   html += '<div class="fb-header"><span style="font-size:.78rem;font-weight:700;color:var(--yl)">&#9997; Corrections (' + feedback.length + ')</span></div>';
 
   feedback.forEach(function(item) {
