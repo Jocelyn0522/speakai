@@ -302,6 +302,15 @@ function stopRecording() {
   document.getElementById("micBtn").className = "mic";
   document.getElementById("micBtn").innerHTML = "&#127897;";
   hideRecIndicator();
+  // Release mic stream immediately after recording stops
+  // This prevents iOS from playing the 3-beep warning when closing the PWA
+  setTimeout(function() {
+    if (recStream && !listening) {
+      try { recStream.getTracks().forEach(function(t) { t.stop(); }); } catch(e) {}
+      recStream = null;
+      micPermissionGranted = false;
+    }
+  }, 500);
 }
 
 // ── Release mic when app goes to background ──
