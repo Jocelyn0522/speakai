@@ -79,6 +79,9 @@ textarea::placeholder{color:var(--t3)}
 .key-box input{width:100%;background:var(--s2);border:1.5px solid var(--bd);border-radius:10px;padding:11px 14px;color:var(--tx);font-size:.9rem;outline:none;margin-bottom:12px;font-family:monospace}
 .key-box button{width:100%;background:linear-gradient(135deg,var(--ac),var(--ac2));border:none;border-radius:10px;padding:12px;color:#fff;font-size:.95rem;font-weight:700;cursor:pointer}
 .key-box small{display:block;font-size:.75rem;color:var(--t3);text-align:center;margin-top:10px}
+.rec-indicator{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:998;text-align:center;pointer-events:none}
+.rec-indicator .rec-circle{width:80px;height:80px;border-radius:50%;background:rgba(248,113,113,.2);border:3px solid var(--rd);display:flex;align-items:center;justify-content:center;font-size:32px;margin:0 auto 10px;animation:pls 1.2s infinite}
+.rec-indicator .rec-text{color:var(--rd);font-size:.85rem;font-weight:600}
 </style>
 </head>
 <body>
@@ -104,7 +107,7 @@ textarea::placeholder{color:var(--t3)}
   <div class="empty" id="empty">
     <div class="empty-i">&#127897;</div>
     <div class="empty-t">Ready to practise!</div>
-    <div class="empty-s">Tap the mic or type to start. I will reply naturally and correct your English.</div>
+    <div class="empty-s">Tap the mic to record, or type. I will reply and correct your English.</div>
   </div>
 </div>
 <div class="bot">
@@ -112,8 +115,7 @@ textarea::placeholder{color:var(--t3)}
   <div class="irow">
     <button class="mic" id="micBtn" onclick="toggleMic()">&#127897;</button>
     <div class="iwrap">
-      <textarea id="ti" placeholder="Type or tap mic..." rows="1"
-        onkeydown="onKey(event)" oninput="resize(this)"></textarea>
+      <textarea id="ti" placeholder="Type or tap mic..." rows="1" onkeydown="onKey(event)" oninput="resize(this)"></textarea>
     </div>
     <button class="sbtn" id="sb" onclick="send()">&#8593;</button>
   </div>
@@ -121,231 +123,279 @@ textarea::placeholder{color:var(--t3)}
 <div class="toast" id="toast"></div>
 
 <script>
-var MODEL = 'gpt-4o';
-var apiKey = localStorage.getItem('sk') || '';
+var MODEL = "gpt-4o";
+var apiKey = localStorage.getItem("sk") || "";
 var msgs = [];
 var listening = false;
 var thinking = false;
-var rec = null;
-var mode = 'free';
+var mode = "free";
+var mediaRecorder = null;
+var audioChunks = [];
+var recStream = null;
 
 var MODES = {
   free: {
-    hints: ['Tell me about your day', 'What are your weekend plans?', 'Recommend a movie', 'What do you think about AI?', 'Describe your hometown'],
-    sys: 'You are a friendly English speaking coach. The user is a Taiwanese Product Designer (B1-B2) practising English. Have a natural conversation. After your reply, output ONLY this JSON on the last line: {"f":[{"o":"original phrase","c":"corrected version","t":"tip"}]} or {"f":"ok"} if perfect. Keep reply under 3 sentences.'
+    hints: ["Tell me about your day", "What are your weekend plans?", "Recommend a movie", "What do you think about AI?", "Describe your hometown"],
+    sys: "You are a friendly English speaking coach. The user is a Taiwanese Product Designer (B1-B2) practising English. Have a natural conversation. After your reply, output ONLY this JSON on the last line: {\"f\":[{\"o\":\"original phrase\",\"c\":\"corrected version\",\"t\":\"tip\"}]} or {\"f\":\"ok\"} if perfect. Keep reply under 3 sentences."
   },
   interview: {
-    hints: ['Tell me about yourself', 'Walk me through your portfolio', 'How do you handle conflict?', 'Describe a design failure', 'Why do you want this role?'],
-    sys: 'You are a hiring manager interviewing for Staff Product Designer. Ask one question, react to answers. After your reply, output JSON on last line: {"f":[{"o":"phrase","c":"better version","t":"why"}]} or {"f":"ok"}.'
+    hints: ["Tell me about yourself", "Walk me through your portfolio", "How do you handle conflict?", "Describe a design failure", "Why do you want this role?"],
+    sys: "You are a hiring manager interviewing for Staff Product Designer. Ask one question, react to answers. After your reply, output JSON on last line: {\"f\":[{\"o\":\"phrase\",\"c\":\"better version\",\"t\":\"why\"}]} or {\"f\":\"ok\"}."
   },
   design: {
-    hints: ['What is your design process?', 'Thoughts on design systems?', 'How do you do user research?', 'Figma vs other tools?', 'How do you present to stakeholders?'],
-    sys: 'You are a senior Product Designer chatting with a peer. Discuss UX, design systems, product thinking. After your reply, output JSON on last line: {"f":[{"o":"phrase","c":"better UX term","t":"explanation"}]} or {"f":"ok"}.'
+    hints: ["What is your design process?", "Thoughts on design systems?", "How do you do user research?", "Figma vs other tools?", "How do you present to stakeholders?"],
+    sys: "You are a senior Product Designer chatting with a peer. Discuss UX, design systems, product thinking. After your reply, output JSON on last line: {\"f\":[{\"o\":\"phrase\",\"c\":\"better UX term\",\"t\":\"explanation\"}]} or {\"f\":\"ok\"}."
   },
   grammar: {
-    hints: ['I have been to many places', 'I used to work on mobile apps', 'If I had more time I would...', 'The design was made by me', 'I am working here since 2020'],
-    sys: 'You are a grammar coach. Reply conversationally. Then output JSON on last line listing ALL errors: {"f":[{"o":"wrong phrase","c":"correct","t":"grammar rule"}]} or {"f":"ok"}.'
+    hints: ["I have been to many places", "I used to work on mobile apps", "If I had more time I would...", "The design was made by me", "I am working here since 2020"],
+    sys: "You are a grammar coach. Reply conversationally. Then output JSON on last line listing ALL errors: {\"f\":[{\"o\":\"wrong phrase\",\"c\":\"correct\",\"t\":\"grammar rule\"}]} or {\"f\":\"ok\"}."
   },
   debate: {
-    hints: ['AI will replace designers', 'Remote work is better', 'UX research is overrated', 'Design systems kill creativity', 'Social media does more harm than good'],
-    sys: 'You are a debate partner. Take the opposing view. After reply, output JSON on last line: {"f":[{"o":"phrase","c":"more persuasive version","t":"why"}]} or {"f":"ok"}.'
+    hints: ["AI will replace designers", "Remote work is better", "UX research is overrated", "Design systems kill creativity", "Social media does more harm than good"],
+    sys: "You are a debate partner. Take the opposing view. After reply, output JSON on last line: {\"f\":[{\"o\":\"phrase\",\"c\":\"more persuasive version\",\"t\":\"why\"}]} or {\"f\":\"ok\"}."
   }
 };
 
 window.onload = function() {
-  setMode(document.querySelector('.mc.active'));
-  if (!apiKey) { showKey(); } else { document.getElementById('dot').className = 'dot on'; }
+  setMode(document.querySelector(".mc.active"));
+  if (!apiKey) { showKey(); } else { document.getElementById("dot").className = "dot on"; }
 };
 
 function setMode(el) {
-  document.querySelectorAll('.mc').forEach(function(c){ c.classList.remove('active'); });
-  el.classList.add('active');
-  mode = el.getAttribute('data-m');
-  var h = document.getElementById('hints');
+  document.querySelectorAll(".mc").forEach(function(c){ c.classList.remove("active"); });
+  el.classList.add("active");
+  mode = el.getAttribute("data-m");
+  var h = document.getElementById("hints");
   h.innerHTML = MODES[mode].hints.map(function(t){
-    return '<div class="hc" onclick="useHint(this)">' + t + '</div>';
-  }).join('');
+    return '<div class="hc" onclick="useHint(this)">' + t + "</div>";
+  }).join("");
   msgs = [];
 }
 
 function useHint(el) {
-  document.getElementById('ti').value = el.textContent;
-  resize(document.getElementById('ti'));
+  document.getElementById("ti").value = el.textContent;
+  resize(document.getElementById("ti"));
 }
 
 function showKey() {
-  var old = document.getElementById('overlay');
+  var old = document.getElementById("overlay");
   if (old) old.remove();
-  var d = document.createElement('div');
-  d.className = 'overlay'; d.id = 'overlay';
-  d.innerHTML = '<div class="key-box"><div style="font-size:1.8rem;text-align:center;margin-bottom:12px">&#128273;</div><h2>OpenAI API Key</h2><p>Saved only on this device. Never sent anywhere.</p><input id="ki" type="password" placeholder="sk-proj-..." /><button onclick="saveKey()">Save &amp; Start</button><small>Get your key at platform.openai.com</small></div>';
+  var d = document.createElement("div");
+  d.className = "overlay"; d.id = "overlay";
+  d.innerHTML = '<div class="key-box"><div style="font-size:1.8rem;text-align:center;margin-bottom:12px">&#128273;</div><h2>OpenAI API Key</h2><p>Saved only on this device. Never sent anywhere except OpenAI.</p><input id="ki" type="password" placeholder="sk-proj-..." /><button onclick="saveKey()">Save &amp; Start</button><small>Get your key at platform.openai.com</small></div>';
   document.body.appendChild(d);
-  setTimeout(function(){ var ki = document.getElementById('ki'); if(ki) ki.focus(); }, 200);
+  setTimeout(function(){ var ki = document.getElementById("ki"); if(ki) ki.focus(); }, 200);
 }
 
 function saveKey() {
-  var k = document.getElementById('ki') ? document.getElementById('ki').value.trim() : '';
-  if (!k.startsWith('sk-')) { alert('Please enter a valid key starting with sk-'); return; }
+  var k = document.getElementById("ki") ? document.getElementById("ki").value.trim() : "";
+  if (!k.startsWith("sk-")) { alert("Please enter a valid key starting with sk-"); return; }
   apiKey = k;
-  localStorage.setItem('sk', k);
-  var o = document.getElementById('overlay');
+  localStorage.setItem("sk", k);
+  var o = document.getElementById("overlay");
   if (o) o.remove();
-  document.getElementById('dot').className = 'dot on';
+  document.getElementById("dot").className = "dot on";
 }
 
-// ── MIC ──────────────────────────────────────────────────
-function buildRec() {
-  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) return null;
-  var r = new SR();
-  r.lang = 'en-US'; r.interimResults = true; r.continuous = false;
-  r.onresult = function(e) {
-    var fin = '', int2 = '';
-    for (var i = 0; i < e.results.length; i++) {
-      if (e.results[i].isFinal) fin += e.results[i][0].transcript;
-      else int2 += e.results[i][0].transcript;
-    }
-    document.getElementById('ti').value = fin || int2;
-    resize(document.getElementById('ti'));
-  };
-  r.onend = function() {
-    listening = false;
-    document.getElementById('micBtn').className = 'mic';
-    document.getElementById('micBtn').innerHTML = '&#127897;';
-    var v = document.getElementById('ti').value.trim();
-    if (v) send();
-  };
-  r.onerror = function(e) {
-    listening = false;
-    document.getElementById('micBtn').className = 'mic';
-    document.getElementById('micBtn').innerHTML = '&#127897;';
-    if (e.error === 'not-allowed') toast('Mic blocked — check Settings > Safari > Mic');
-    else if (e.error !== 'no-speech') toast('Mic error: ' + e.error);
-  };
-  return r;
-}
-
+// ── MIC: MediaRecorder + Whisper API ─────────────────────
 function toggleMic() {
   if (!apiKey) { showKey(); return; }
-  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) { toast('Use Safari on iPhone for mic'); return; }
-  if (listening) { if (rec) rec.stop(); return; }
+  if (listening) { stopRecording(); return; }
+  startRecording();
+}
 
+function startRecording() {
   navigator.mediaDevices.getUserMedia({ audio: true }).then(function(stream) {
-    stream.getTracks().forEach(function(t){ t.stop(); });
-    rec = buildRec();
-    if (!rec) { toast('Speech recognition unavailable'); return; }
-    listening = true;
-    document.getElementById('micBtn').className = 'mic on';
-    document.getElementById('micBtn').innerHTML = '&#9209;';
-    document.getElementById('ti').value = '';
-    try { rec.start(); toast('Listening... tap to stop'); }
-    catch(e) {
-      listening = false;
-      document.getElementById('micBtn').className = 'mic';
-      document.getElementById('micBtn').innerHTML = '&#127897;';
+    recStream = stream;
+    audioChunks = [];
+    // Try audio/mp4 for iOS, fallback to webm
+    var mimeType = "audio/mp4";
+    if (!MediaRecorder.isTypeSupported(mimeType)) {
+      mimeType = "audio/webm";
     }
-  }).catch(function() {
-    toast('Mic denied — Settings > Safari > Microphone > Allow');
+    if (!MediaRecorder.isTypeSupported(mimeType)) {
+      mimeType = "";
+    }
+    try {
+      mediaRecorder = mimeType ? new MediaRecorder(stream, { mimeType: mimeType }) : new MediaRecorder(stream);
+    } catch(e) {
+      toast("Recording not supported");
+      stream.getTracks().forEach(function(t){ t.stop(); });
+      return;
+    }
+
+    mediaRecorder.ondataavailable = function(e) {
+      if (e.data && e.data.size > 0) audioChunks.push(e.data);
+    };
+
+    mediaRecorder.onstop = function() {
+      var audioBlob = new Blob(audioChunks, { type: mediaRecorder.mimeType || "audio/webm" });
+      // Stop mic
+      if (recStream) { recStream.getTracks().forEach(function(t){ t.stop(); }); recStream = null; }
+      // Transcribe via Whisper
+      transcribeAudio(audioBlob);
+    };
+
+    mediaRecorder.start();
+    listening = true;
+    document.getElementById("micBtn").className = "mic on";
+    document.getElementById("micBtn").innerHTML = "&#9209;";
+    showRecIndicator();
+    toast("Recording... tap to stop");
+  }).catch(function(err) {
+    toast("Mic denied - check Settings > Safari > Microphone");
+  });
+}
+
+function stopRecording() {
+  if (mediaRecorder && mediaRecorder.state !== "inactive") {
+    mediaRecorder.stop();
+  }
+  listening = false;
+  document.getElementById("micBtn").className = "mic";
+  document.getElementById("micBtn").innerHTML = "&#127897;";
+  hideRecIndicator();
+}
+
+function showRecIndicator() {
+  var old = document.getElementById("recInd");
+  if (old) old.remove();
+  var d = document.createElement("div");
+  d.className = "rec-indicator"; d.id = "recInd";
+  d.innerHTML = '<div class="rec-circle">&#127897;</div><div class="rec-text">Recording...</div>';
+  document.body.appendChild(d);
+}
+
+function hideRecIndicator() {
+  var el = document.getElementById("recInd");
+  if (el) el.remove();
+}
+
+function transcribeAudio(blob) {
+  if (blob.size < 100) { toast("Audio too short"); return; }
+  toast("Transcribing...");
+
+  var formData = new FormData();
+  formData.append("file", blob, "audio.webm");
+  formData.append("model", "whisper-1");
+  formData.append("language", "en");
+
+  fetch("https://api.openai.com/v1/audio/transcriptions", {
+    method: "POST",
+    headers: { "Authorization": "Bearer " + apiKey },
+    body: formData
+  }).then(function(res) {
+    if (!res.ok) return res.json().then(function(d){ throw new Error(d.error ? d.error.message : "Whisper error " + res.status); });
+    return res.json();
+  }).then(function(data) {
+    var text = data.text.trim();
+    if (text) {
+      document.getElementById("ti").value = text;
+      resize(document.getElementById("ti"));
+      send();
+    } else {
+      toast("Could not hear you - try again");
+    }
+  }).catch(function(err) {
+    toast("Transcription error: " + err.message);
   });
 }
 
 // ── SEND ─────────────────────────────────────────────────
-function onKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }
+function onKey(e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }
 
-function resize(el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 100) + 'px'; }
+function resize(el) { el.style.height = "auto"; el.style.height = Math.min(el.scrollHeight, 100) + "px"; }
 
 function send() {
-  var text = document.getElementById('ti').value.trim();
+  var text = document.getElementById("ti").value.trim();
   if (!text || thinking) return;
   if (!apiKey) { showKey(); return; }
-  document.getElementById('ti').value = '';
-  resize(document.getElementById('ti'));
-  var e = document.getElementById('empty');
+  document.getElementById("ti").value = "";
+  resize(document.getElementById("ti"));
+  var e = document.getElementById("empty");
   if (e) e.remove();
 
-  addBub('u', text, null);
-  msgs.push({ role: 'user', content: text });
+  addBub("u", text, null);
+  msgs.push({ role: "user", content: text });
 
   var tid = addThink();
   thinking = true;
-  document.getElementById('sb').disabled = true;
+  document.getElementById("sb").disabled = true;
 
   var body = JSON.stringify({
     model: MODEL,
-    messages: [{ role: 'system', content: MODES[mode].sys }].concat(msgs),
+    messages: [{ role: "system", content: MODES[mode].sys }].concat(msgs),
     temperature: 0.8,
     max_tokens: 600
   });
 
-  fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
+  fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": "Bearer " + apiKey },
     body: body
   }).then(function(res) {
-    if (!res.ok) return res.json().then(function(d){ throw new Error(d.error ? d.error.message : 'API error ' + res.status); });
+    if (!res.ok) return res.json().then(function(d){ throw new Error(d.error ? d.error.message : "API error " + res.status); });
     return res.json();
   }).then(function(data) {
     var reply = data.choices[0].message.content;
-    msgs.push({ role: 'assistant', content: reply });
+    msgs.push({ role: "assistant", content: reply });
     removeThink(tid);
     renderReply(reply);
   }).catch(function(err) {
     removeThink(tid);
-    addBub('ai', 'Error: ' + err.message, null);
+    addBub("ai", "Error: " + err.message, null);
   }).finally(function() {
     thinking = false;
-    document.getElementById('sb').disabled = false;
+    document.getElementById("sb").disabled = false;
     scrollBot();
   });
 }
 
 function renderReply(full) {
-  // Extract JSON from last line
-  var lines = full.trim().split('\n');
+  var lines = full.trim().split("\n");
   var last = lines[lines.length - 1].trim();
   var fb = null;
   var text = full;
-  if (last.startsWith('{') && last.includes('"f"')) {
+  if (last.indexOf("{") === 0 && last.indexOf('"f"') >= 0) {
     try {
       fb = JSON.parse(last);
-      text = lines.slice(0, -1).join('\n').trim();
+      text = lines.slice(0, -1).join("\n").trim();
     } catch(e) {}
   }
-  addBub('ai', text, fb);
+  addBub("ai", text, fb);
 }
 
 function addBub(side, text, fb) {
-  var row = document.createElement('div');
-  row.className = 'row ' + side;
-  var av = side === 'u' ? '<div class="av me">&#128522;</div>' : '<div class="av ai">&#129302;</div>';
-  var fbHtml = '';
+  var row = document.createElement("div");
+  row.className = "row " + side;
+  var av = side === "u" ? '<div class="av me">&#128522;</div>' : '<div class="av ai">&#129302;</div>';
+  var fbHtml = "";
   if (fb) {
-    if (fb.f === 'ok') {
+    if (fb.f === "ok") {
       fbHtml = '<div class="ok">&#10003; Great English! No corrections needed.</div>';
     } else if (Array.isArray(fb.f) && fb.f.length > 0) {
       fbHtml = '<div class="fb"><div class="fb-t">&#9997; Feedback</div>';
       fb.f.forEach(function(item) {
-        fbHtml += '<div class="fb-row"><span class="orig">' + esc(item.o) + '</span> &rarr; <span class="corr">' + esc(item.c) + '</span><br><span class="tip">&#128161; ' + esc(item.t) + '</span></div>';
+        fbHtml += '<div class="fb-row"><span class="orig">' + esc(item.o) + '</span> &rarr; <span class="corr">' + esc(item.c) + '</span><br><span class="tip">&#128161; ' + esc(item.t) + "</span></div>";
       });
-      fbHtml += '</div>';
+      fbHtml += "</div>";
     }
   }
-  row.innerHTML = av + '<div class="mc2"><div class="bub">' + esc(text) + '</div>' + fbHtml + '</div>';
-  if (side === 'u') {
-    var ch = row.querySelector('.mc2');
-    row.innerHTML = '<div class="mc2"><div class="bub">' + esc(text) + '</div>' + fbHtml + '</div>' + av;
+  if (side === "u") {
+    row.innerHTML = '<div class="mc2"><div class="bub">' + esc(text) + "</div>" + fbHtml + "</div>" + av;
+  } else {
+    row.innerHTML = av + '<div class="mc2"><div class="bub">' + esc(text) + "</div>" + fbHtml + "</div>";
   }
-  document.getElementById('chat').appendChild(row);
+  document.getElementById("chat").appendChild(row);
   scrollBot();
 }
 
 function addThink() {
-  var id = 'tk' + Date.now();
-  var row = document.createElement('div');
-  row.className = 'row ai'; row.id = id;
+  var id = "tk" + Date.now();
+  var row = document.createElement("div");
+  row.className = "row ai"; row.id = id;
   row.innerHTML = '<div class="av ai">&#129302;</div><div class="mc2"><div class="bub think"><div class="dots"><span></span><span></span><span></span></div></div></div>';
-  document.getElementById('chat').appendChild(row);
+  document.getElementById("chat").appendChild(row);
   scrollBot();
   return id;
 }
@@ -354,18 +404,18 @@ function removeThink(id) { var el = document.getElementById(id); if (el) el.remo
 
 function clearChat() {
   msgs = [];
-  document.getElementById('chat').innerHTML = '<div class="empty" id="empty"><div class="empty-i">&#127897;</div><div class="empty-t">Ready to practise!</div><div class="empty-s">Tap the mic or type to start.</div></div>';
-  toast('Chat cleared');
+  document.getElementById("chat").innerHTML = '<div class="empty" id="empty"><div class="empty-i">&#127897;</div><div class="empty-t">Ready to practise!</div><div class="empty-s">Tap the mic to record, or type.</div></div>';
+  toast("Chat cleared");
 }
 
-function scrollBot() { var c = document.getElementById('chat'); setTimeout(function(){ c.scrollTop = c.scrollHeight; }, 50); }
+function scrollBot() { var c = document.getElementById("chat"); setTimeout(function(){ c.scrollTop = c.scrollHeight; }, 50); }
 
-function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>'); }
+function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/\n/g,"<br>"); }
 
 function toast(msg) {
-  var t = document.getElementById('toast');
-  t.textContent = msg; t.className = 'toast on';
-  setTimeout(function(){ t.className = 'toast'; }, 2800);
+  var t = document.getElementById("toast");
+  t.textContent = msg; t.className = "toast on";
+  setTimeout(function(){ t.className = "toast"; }, 3000);
 }
 </script>
 </body>
